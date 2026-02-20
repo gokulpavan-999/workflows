@@ -1,7 +1,6 @@
 name: feature-nodejs-pipeline
-
 on:
-  workflow_call:
+  workflow_call: # will be called by someone, should get inputs from caller
     inputs:
       project:
         required: true
@@ -12,23 +11,21 @@ on:
       environment:
         required: true
         type: string
-
 env:
   ACC_ID: 014641572640
-
 jobs:
   feature-nodejs-pipeline:
-    runs-on: ubuntu-latest   # ✅ FIXED
-
+    runs-on: self-hosted
     steps:
     - name: checkout code
-      uses: actions/checkout@v4   # ✅ FIXED
-
+      uses: actions/checkout@v6
     - name: list files
       run: ls -l
 
     - name: get the version
-      run: echo "APP_VERSION=${GITHUB_SHA::9}" >> "$GITHUB_ENV"
+      run: |
+        # if you store it in GITHUB_ENV, you can use in other steps in the same job
+        echo "APP_VERSION=${GITHUB_SHA::9}" >> "$GITHUB_ENV"
 
     - name: print inputs
       run: |
@@ -37,16 +34,32 @@ jobs:
 
     - name: install dependencies
       run: npm install
-
     - name: run unit tests
       id: unit_tests
       run: echo "run unit tests"
 
     - name: Update unit tests status
       if: always()
-      uses: gokulpavan-999/workflows/.github/actions/update-commit-status@main  # ✅ FIXED
+      uses: gokulpavan-99/workflows/.github/actions/update-commit-status@main
       with:
         sha: ${{ github.sha }}
-        state: ${{ steps.unit_tests.outcome }}
+        state: ${{ steps.unit_tests.outcome }}     # success / failure / cancelled
         context: UNIT_TESTS
         description: ${{ steps.unit_tests.outcome }}
+
+    - name: docker build
+      id: docker_build
+      run: |
+        docker build -t ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${{ inputs.project }}/${{ inputs.component }}:${APP_VERSION} .
+        docker images
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v5.1.1
+      with:
+        aws-region: us-east-1
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    - name: push image
+      run: |
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com
+        docker push ${ACC_ID}.dkr.ecr.us-east-1.amazonaws.com/${{ inputs.project }}/${{ inputs.component }}:${APP_VERSION}
